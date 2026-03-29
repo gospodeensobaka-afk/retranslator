@@ -14,20 +14,18 @@ body{background:#0e1117;color:#eee;font-family:system-ui,sans-serif;min-height:1
 #login input{width:100%;max-width:280px;background:#1a1f2e;border:1px solid #2a3040;
   border-radius:10px;color:#eee;font-size:18px;text-align:center;padding:12px;outline:none}
 #login button{width:100%;max-width:280px;height:48px;border-radius:10px;border:none;
-  background:#3a7bd5;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+  background:#3a7bd5;color:#fff;font-size:15px;font-weight:600;cursor:pointer;
+  -webkit-appearance:none;}
 
 #app{display:none;flex-direction:column;height:100vh}
-
 .topbar{padding:12px 16px;background:#141926;border-bottom:1px solid #222;
   display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:14px;font-weight:600;color:#eee}
 .status{font-size:12px;color:#666}
 .status b{color:#2ecc71}
-
 .grid{flex:1;overflow-y:auto;display:grid;
   grid-template-columns:repeat(3,1fr);gap:10px;padding:12px}
 @media(min-width:480px){.grid{grid-template-columns:repeat(4,1fr)}}
-
 .thumb{aspect-ratio:4/3;border-radius:10px;overflow:hidden;cursor:pointer;
   position:relative;background:#1a1f2e;border:2px solid transparent;transition:border-color .15s}
 .thumb.active{border-color:#3a7bd5}
@@ -35,7 +33,6 @@ body{background:#0e1117;color:#eee;font-family:system-ui,sans-serif;min-height:1
 .thumb-label{position:absolute;bottom:0;left:0;right:0;
   padding:4px 6px;font-size:10px;color:#ccc;
   background:linear-gradient(transparent,rgba(0,0,0,.75));line-height:1.3}
-
 .sent-bar{padding:10px 16px;background:#141926;border-top:1px solid #222;
   font-size:13px;color:#666;flex-shrink:0;min-height:40px}
 .sent-bar.ok{color:#2ecc71}
@@ -46,9 +43,9 @@ body{background:#0e1117;color:#eee;font-family:system-ui,sans-serif;min-height:1
 
 <div id="login">
   <h1>Пульт экскурсии</h1>
-  <input id="serverInput" placeholder="http://89.169.47.118:8765" type="url"/>
-  <input id="secretInput" placeholder="Секрет" type="password"/>
-  <button onclick="doLogin()">Войти</button>
+  <input id="serverInput" type="text" placeholder="http://89.169.47.118:8765" autocomplete="off" autocorrect="off" autocapitalize="off"/>
+  <input id="secretInput" type="text" placeholder="Секрет (код доступа)" autocomplete="off" autocorrect="off" autocapitalize="off"/>
+  <button id="loginBtn">Войти</button>
 </div>
 
 <div id="app">
@@ -61,95 +58,104 @@ body{background:#0e1117;color:#eee;font-family:system-ui,sans-serif;min-height:1
 </div>
 
 <script>
-let SERVER = "", SECRET = "", photos = [], activeIdx = null;
+var SERVER = "", SECRET = "", photos = [], activeIdx = null;
 
-function doLogin() {
-  SERVER = document.getElementById("serverInput").value.replace(/\/$/, "");
-  SECRET = document.getElementById("secretInput").value;
-  if (!SERVER || !SECRET) return;
-  localStorage.setItem("remote_server", SERVER);
-  localStorage.setItem("remote_secret", SECRET);
+document.getElementById("loginBtn").addEventListener("click", function() {
+  var s = document.getElementById("serverInput").value.trim().replace(/\/$/, "");
+  var k = document.getElementById("secretInput").value.trim();
+  if (!s || !k) {
+    alert("Заполните оба поля");
+    return;
+  }
+  SERVER = s;
+  SECRET = k;
+  try {
+    localStorage.setItem("rs", s);
+    localStorage.setItem("rk", k);
+  } catch(e) {}
   initApp();
-}
+});
 
-async function initApp() {
+function initApp() {
   document.getElementById("login").style.display = "none";
-  document.getElementById("app").style.display   = "flex";
-  await loadPhotos();
+  document.getElementById("app").style.display = "flex";
+  loadPhotos();
   pollStatus();
 }
 
-async function loadPhotos() {
-  try {
-    const r = await fetch(`${SERVER}/photos?secret=${SECRET}`);
-    const d = await r.json();
-    if (!d.ok) { alert("Неверный секрет"); return; }
-    photos = d.photos;
-    renderGrid();
-  } catch(e) {
-    alert("Не могу подключиться к серверу:\n" + e.message);
-  }
+function loadPhotos() {
+  fetch(SERVER + "/photos?secret=" + SECRET)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { alert("Неверный секрет"); return; }
+      photos = d.photos;
+      renderGrid();
+    })
+    .catch(function(e){
+      alert("Не могу подключиться:\n" + e.message);
+    });
 }
 
 function renderGrid() {
-  const grid = document.getElementById("grid");
+  var grid = document.getElementById("grid");
   grid.innerHTML = "";
-  photos.forEach((p, i) => {
-    const div = document.createElement("div");
+  photos.forEach(function(p, i) {
+    var div = document.createElement("div");
     div.className = "thumb" + (i === activeIdx ? " active" : "");
-    div.innerHTML = `<img src="${p.preview}" loading="lazy"/><div class="thumb-label">${p.title}</div>`;
-    div.onclick = () => sendPhoto(i);
+    div.innerHTML = '<img src="' + p.preview + '" loading="lazy"/><div class="thumb-label">' + p.title + '</div>';
+    div.onclick = function(){ sendPhoto(i); };
     grid.appendChild(div);
   });
 }
 
-async function sendPhoto(idx) {
-  const p = photos[idx];
-  const bar = document.getElementById("sentBar");
+function sendPhoto(idx) {
+  var p = photos[idx];
+  var bar = document.getElementById("sentBar");
   bar.className = "sent-bar";
   bar.textContent = "Отправляю…";
-  try {
-    const r = await fetch(`${SERVER}/remote`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({secret: SECRET, photo_id: p.id})
-    });
-    const d = await r.json();
+  fetch(SERVER + "/remote", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({secret: SECRET, photo_id: p.id})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
     if (d.ok) {
       activeIdx = idx;
       renderGrid();
       bar.className = "sent-bar ok";
-      bar.textContent = `✓ ${p.title} — отправлено ${d.sent} участникам`;
+      bar.textContent = "✓ " + p.title + " — отправлено " + d.sent + " участникам";
     } else {
       bar.className = "sent-bar err";
       bar.textContent = "Ошибка: " + JSON.stringify(d);
     }
-  } catch(e) {
+  })
+  .catch(function(e){
     bar.className = "sent-bar err";
     bar.textContent = "Ошибка сети: " + e.message;
-  }
+  });
 }
 
-async function pollStatus() {
-  while (true) {
-    try {
-      const r = await fetch(`${SERVER}/status?secret=${SECRET}`);
-      const d = await r.json();
-      if (d.ok) {
-        document.getElementById("statusEl").innerHTML =
-          `<b>${d.participants}</b> онлайн`;
-      }
-    } catch {}
-    await new Promise(res => setTimeout(res, 5000));
-  }
+function pollStatus() {
+  setInterval(function() {
+    fetch(SERVER + "/status?secret=" + SECRET)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.ok) {
+          document.getElementById("statusEl").innerHTML = "<b>" + d.participants + "</b> онлайн";
+        }
+      })
+      .catch(function(){});
+  }, 5000);
 }
 
-// Восстановить из localStorage
-window.addEventListener("load", () => {
-  const s = localStorage.getItem("remote_server");
-  const k = localStorage.getItem("remote_secret");
-  if (s) document.getElementById("serverInput").value = s;
-  if (k) document.getElementById("secretInput").value = k;
+window.addEventListener("load", function() {
+  try {
+    var s = localStorage.getItem("rs");
+    var k = localStorage.getItem("rk");
+    if (s) document.getElementById("serverInput").value = s;
+    if (k) document.getElementById("secretInput").value = k;
+  } catch(e) {}
 });
 </script>
 </body>
